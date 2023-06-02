@@ -1,0 +1,160 @@
+<html>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/2.3.1/jsencrypt.min.js" integrity="sha512-zDvrqenA0eFJZCxBsryzUZcvihvNlEXbteMv62yRxdhR4s7K1aaz+LjsRyfk6M+YJLyAJEuuquIAI8I8GgLC8A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/forge/0.10.0/forge.min.js"></script>
+
+<script>
+
+var rsa = forge.pki.rsa;
+var crypt = new JSEncrypt();
+
+
+var name;
+var ws;
+var keyPair; 
+var users;
+
+
+
+function genKeyPair() {
+	var kp = rsa.generateKeyPair({ bits: 2048 });
+	
+	keyPair = {
+		publicKey: forge.pki.publicKeyToPem(kp.publicKey),
+		privateKey: forge.pki.privateKeyToPem(kp.privateKey)
+	}
+	
+	return keyPair;
+	
+}
+
+async function sendMessage(){
+
+	var userList = document.getElementById('users');	
+	var selectedUser = userList.value;
+	var msg = document.getElementById("message").value
+	var encMsg = "";
+	
+	for (var i = 0; i < users.length; i++){
+	
+		var key = "";
+	
+		if (users[i].name == selectedUser){
+			crypt.setPrivateKey(users[i].publicKey);
+			encMsg = crypt.encrypt(msg);
+		}
+	}
+
+	var response = await fetch("/api/SendMessage", {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			name: selectedUser,
+			message: encMsg,
+			from: name
+		})
+    });	
+	
+	var htmlStr = `<h4 style="background-color:#e3ff3e3;text-align:left">${name} 🡪 ${selectedUser} </h4>`
+	htmlStr += `<p style="background-color:#e3ff3e3;text-align:left">${msg}</p>`
+	document.getElementById("messages").innerHTML += htmlStr;
+
+}
+
+async function getUsers(){
+	console.log("connected");
+	var response = await fetch("/api/GetUsers", {method: 'GET'});			
+	console.log(response);
+	users = await response.json();
+
+
+	
+	var userList = document.getElementById('users');
+	
+	var selectedUser = userList.value;
+
+	while (userList.firstChild) {
+	  userList.removeChild(userList.firstChild);
+	}	
+	
+	for (var i = 0; i < users.length; i++){
+		var option = document.createElement('option');
+		option.text = users[i].name;
+		option.value = users[i].name;
+		if (users[i].name == selectedUser) option.selected = true;
+		userList.appendChild(option);
+	}
+	
+	
+}
+
+async function register(){
+
+	var keyPair = genKeyPair();
+	name = document.getElementById("name").value;
+	
+	var response = await fetch("/api/NewUser", {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			name: name,
+			publicKey: keyPair.publicKey	  
+		})
+    });	
+
+	
+	let res = await fetch(`${window.location.origin}/api/Negotiate?userid=${name}`);
+	let url = await res.json();
+	ws = new WebSocket(url.url);
+	
+	ws.onopen = async () => {	
+		getUsers();
+		document.getElementById("login").style.display = "none";
+		document.getElementById("chat").style.display = "block";		
+	}
+
+	ws.onmessage = event => {
+		var data = JSON.parse(event.data);
+		if (data && data.type){
+			if(data.type == "newUser"){
+				getUsers();
+			}else if (data.type == "message") {
+			
+				crypt.setPrivateKey(keyPair.privateKey);
+				var msg = crypt.decrypt(data.message);
+			
+				var htmlStr = `<h4 style="background-color:#ff3e3e3;text-align:right">${data.from} 🡪 ${name}</h4>`
+				htmlStr += `<p style="background-color:#ff3e3e3;text-align:right">${msg}</p>`
+				document.getElementById("messages").innerHTML += htmlStr;
+			}
+		}
+		console.log(event);
+	};
+
+}
+
+
+
+
+</script>
+<body style="width:100%;display: flex;justify-content: center;">
+<div style="width:800px;padding:5px;font-family:tahoma">
+<h3 style="background-color:#e3e3ff" >Azure Web PubSub Secure Chat</h3>
+<p id="login">
+Name: <input type="text" id="name"><input value="Start Chatting" type="button" onclick="register()">
+</p>
+
+<div id="chat" style="display:none">
+
+<div id="messages">
+</div >
+User: <select id="users"></select> Message: <input type="text" id="message"><input value="Send" type="button" onclick="sendMessage()">
+</div>
+</div>
+
+
+</body>
+</html>
